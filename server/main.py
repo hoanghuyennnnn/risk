@@ -1,10 +1,10 @@
 from flask import Flask, request, jsonify, render_template
-from database import db, PriceData, AccountInfo, OpenPositions  # Import db instance and PriceData model
+from database import db, PriceData, AccountInfo, OpenPositions 
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import logging
 import mysql.connector
-import asyncio
+from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
 
@@ -15,9 +15,13 @@ logging.basicConfig(filename="data.log",
                     datefmt='%H:%M:%S',
                     level=logging.DEBUG)
 # Configure and connect to the database
-app.config["SQLALCHEMY_DATABASE_URI"] = 'mysql+pymysql://root:root@localhost:3306/test'
+app.config["SQLALCHEMY_DATABASE_URI"] = 'mysql+pymysql://root1:root@localhost:3306/test'
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
+
+
+# Initialize SocketIO
+socketio = SocketIO(app, async_mode='gevent', manage_session=False)
 
 # Create tables if they don't exist
 with app.app_context():
@@ -55,7 +59,9 @@ def receive_price():
         }
 
         # Update database
-        update_db(data)
+        # Emit to SocketIO clients
+        socketio.emit('update_db', data)
+
         logging.info(f"Received data: {data}")
 
         return jsonify({"message": "Data received successfully", "data": data}), 200
@@ -89,7 +95,8 @@ def receive_account():
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return jsonify({"error" : f"Missing fields: {', '.join(missing_fields)}"}), 400
-        update_account(data)
+        socketio.emit('update_account', data)
+
         account = data["account"]
         account_data[account] = {
             "balance" : data["balance"],
@@ -131,7 +138,8 @@ def receive_position():
         return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}),400
     
     #need update data
-    update_position(data)
+    socketio.emit('update_position', data)
+
     account = data["account"]
     ticket = data["orderticket"]
     position_data[account][ticket] = {
@@ -341,6 +349,5 @@ def update_position(data):
         raise
 
 
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=80)
+    socketio.run(app, port = 80,debug=True)
