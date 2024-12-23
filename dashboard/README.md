@@ -1,14 +1,14 @@
 Problem Breakdown <br> 
-1. Connect to sql server: done 
+1. Connect to sql server
 2. Query data
-3. Create table from data：done
-4. Update table：done
+3. Create table from data
+4. Update table
 5. Create GUI <br>
-- Frame: done
-- Create tab:done
-- Create heading: done
-- Show data: done
-- Refresh data: done
+- Frame
+- Create tab
+- Create heading
+- Show data
+- Refresh data
 
 
 Requirements <br>
