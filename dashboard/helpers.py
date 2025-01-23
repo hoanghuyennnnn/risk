@@ -2,6 +2,16 @@ import tkinter as tk
 from tkinter import ttk 
 
 def calculate_USD(symbol,price_data,account,side):
+    """
+    Calculate the 'rate' to convert ccy to usd.
+
+    Args:
+        symbol : from dict account_symbol_info
+        price_data (float): from API
+        account: from dict account_symbol_info
+
+    Returns:
+        float: rate"""
     rate =0
     if symbol[3:6] == "USD":
         rate = 1
@@ -60,6 +70,16 @@ def calculate_new_price(pre_price, pip, symbol):
         return 0.0  # Return a default value if calculation fails
 
 def calculate_pips(target_price,new_price,symbol):
+    """
+    Calculate the 'needed pips' to convert ccy to usd.
+
+    Args:
+        target_price : user input
+        new_price (float): from calculation
+        symbol: from dict account_symbol_info
+
+    Returns:
+        float: rate"""
     try:
         target_price = float(target_price) if target_price else 0.0
         new_price = float(new_price) if new_price else 0.0
@@ -73,7 +93,6 @@ def calculate_pips(target_price,new_price,symbol):
         print(f"Error in calculate_pip: {e}")
         return 0.0  # Return a default value if calculation fa
 
-#calculation functions herre, day by day is okay
 def calculate_current_pl(market_price,vwap_price,lots,rate):
     """
         rate: is used for to change right ccy to usd
@@ -90,6 +109,19 @@ def calculate_current_pl(market_price,vwap_price,lots,rate):
         print(f"Error in calculate pl: {e}")
         return 0.0
 
+def calculate_cover_lots(cur_pl,pre_pl,rate):
+    """
+    Convert difference to lots
+    Args:
+        cur_pl : from calculation
+        pre_pl (float): from calculation
+        rate: right ccy + "USD"
+
+    Returns:
+        float: lots
+    """
+    different = cur_pl - pre_pl
+    return round(different/(rate*100000),2)
 
 class TreeviewEdit(ttk.Treeview):
     def __init__(self, master, **kw):
@@ -202,6 +234,7 @@ class TreeviewEdit(ttk.Treeview):
                 diff = round(curr_pl - yes_pl, 2)
                 vwap_price = float(info.get("vwap_price",0))
                 rate = calculate_USD(symbol,price_data,account,info['side'])
+                cover_lots = calculate_cover_lots(curr_pl,yes_pl,rate)
                 
                 # Generate a unique identifier for the row
                 item_id = f"{account}-{symbol}"
@@ -219,14 +252,15 @@ class TreeviewEdit(ttk.Treeview):
                     yes_pl,  # Yesterday PL
                     curr_pl,  # Current PL
                     diff,  # Difference
+                    cover_lots,
                     "",  # Placeholder columns
                 ]
 
                 # Insert or update the parent row
                 if item_id in self.get_children():
-                    self.item(item_id, values=values)
+                    self.item(item_id, values=values, tags=("accsym",))
                 else:
-                    self.insert("", "end", iid=item_id, values=values)
+                    self.insert("", "end", iid=item_id, values=values,tags=("accsym",))
 
                 # Insert child rows for each day
                 for day in range(1, 11):
@@ -258,17 +292,19 @@ class TreeviewEdit(ttk.Treeview):
                             new_pl = pre_yl_temp
                         else:
                             new_pl = calculate_current_pl(new_price,vwap_price,pair,rate_usd)
+                        
                         print(f"Symbol {symbol} has rate usd {rate_usd} and new price {new_price} with lots: {pair}")
                     except Exception as e:
                         new_price = ""  # Default to empty if calculation fails
                         pips = ""
                         pre_yl_temp = ""
-                        new_pl = ""
+                        pre_yl = ""
                         new_pl = ""
 
                         print(f"Error calculating new price for {day_item_id}: {e}")
                         print(f"Error calculating new pip for {day_item_id}: {e}")
 
+                    cover_lots_1 = calculate_cover_lots(new_pl,pre_yl,rate_usd)
                     # Define day row values
                     day_values = [
                         "",  # Account
@@ -282,6 +318,7 @@ class TreeviewEdit(ttk.Treeview):
                         pre_yl,
                         new_pl,
                         round(new_pl-pre_yl,2),
+                        cover_lots_1,
                         "",  # Placeholder columns
                     ]
 

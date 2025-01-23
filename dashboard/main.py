@@ -714,7 +714,7 @@ def update_prediction(tree):
 
         # if item in 
     # Apply alternating colors and account row styles
-    tree.tag_configure("account", background="lightblue", font=("Arial", 12, "bold"))
+    tree.tag_configure("accsym", background="lightblue", font=("Arial", 12, "bold"))
     tree.tag_configure("even", background="white")
     tree.tag_configure("odd", background="lightgray")
 
