@@ -8,7 +8,8 @@ import mysql.connector
 from datetime import datetime
 from queue import Empty
 import json
-
+from helpers import TreeviewEdit
+from tkinter import Canvas, Frame, Scrollbar
 
 # Global queues for each tab's data
 q_price = queue.Queue()
@@ -17,10 +18,11 @@ q_position = queue.Queue()
 q_price_sum = queue.Queue()
 q_account_sum = queue.Queue()
 q_position_sum = queue.Queue() 
+q_calendar_data = queue.Queue()
 
 # Function to fetch data from the API
 def fetch_price_data():
-    url = "http://43.131.12.68:80/api/prices/symbol"
+    url = "http://127.0.0.1/api/prices/symbol"
     try:
         response = requests.get(url)
         data = response.json()  # Assuming the data returned is JSON
@@ -37,7 +39,7 @@ def fetch_price_data_in_thread():
         time.sleep(1)  # Fetch new data every second
 
 def fetch_account_data():
-    url = "http://43.131.12.68:80/api/accounts/data"
+    url = "http://127.0.0.1/api/accounts/data"
     try:
         response = requests.get(url)
         data = response.json()
@@ -53,7 +55,7 @@ def fetch_account_data_in_thread():
         time.sleep(1)
 
 def fetch_position_data():
-    url = "http://43.131.12.68:80/api/positions/data"
+    url = "http://127.0.0.1/api/positions/data"
     try:
         response = requests.get(url)
         data = response.json()
@@ -68,27 +70,50 @@ def fetch_position_data_in_thread():
         fetch_position_data()
         time.sleep(1)
 
+
+# def fetch_calendar_data():
+#     url = "http://127.0.0.1/api/calendar/data"
+#     try:
+#         response = requests.get(url)
+#         data = response.json()
+#         q_calendar_data.put(data)
+#         # print(data)
+#     except Exception as e:
+#         error_message = {"error": f"Error fetching position data: {e}"}
+#         q_calendar_data.put(error_message)
+
+# # Thread-safe data fetching function that runs in the background for account data
+# def fetch_calendar_data_in_thread():
+#     while True:
+#         fetch_calendar_data()
+#         time.sleep(1)
+
 def fetch_sum_data():
-    price_url= "http://43.131.12.68:80/api/prices/symbol"
-    position_url = "http://43.131.12.68:80/api/positions/data"
-    acc_url = "http://43.131.12.68:80/api/accounts/data"
+    price_url= "http://127.0.0.1/api/prices/symbol"
+    position_url = "http://127.0.0.1/api/positions/data"
+    acc_url = "http://127.0.0.1/api/accounts/data"
+    calendar_url = "http://127.0.0.1/api/calendar/data"
 
     try:
         response_price = requests.get(price_url)
         response_pos = requests.get(position_url)
         response_acc = requests.get(acc_url)
+        response_cal = requests.get(calendar_url)
         data_price = response_price.json()  
         data_pos = response_pos.json()
         data_acc = response_acc.json()
+        data_cal = response_cal.json()
 
         q_price_sum.put(data_price) 
         q_account_sum.put(data_acc)
         q_position_sum.put(data_pos)
+        q_calendar_data.put(data_cal)
 
     except Exception as e:
         q_price_sum.put(f"Error fetching price data: {e}")
         q_account_sum.put(f"Error fetching account data: {e}")
         q_position_sum.put(f"Error fetching position data: {e}")
+        q_calendar_data.put(f"Error fetching position data: {e}")
 
 def fetch_sum_data_in_thread():
     while True:
@@ -96,16 +121,16 @@ def fetch_sum_data_in_thread():
         time.sleep(1)
 
 # Connect to database to query data 
-# with open("D:\Hoang_report\database\data\dashboard\config.json", "r") as config_file:
-#     config = json.load(config_file)
+with open("D:\Hoang_report\database\data\dashboard\config.json", "r") as config_file:
+    config = json.load(config_file)
 
 def connect_db_fetch_data(query):
     try:
         conn = mysql.connector.connect(
-            host="43.131.12.68",
-            user="root1",
-            password="root",
-            database="test"
+            host=config["host"],
+            user=config["user"],
+            password=config["password"],
+            database=config["database"]
         )
         print("Connect successful")
         cursor = conn.cursor()
@@ -116,29 +141,69 @@ def connect_db_fetch_data(query):
     except Exception as e:
         print(f"Error: {e}")
 
-#function to calculate 
-def calculate_USD(symbol,price_data,account):
+#--------------------------------------------------------------------CALCULATION FUNCTIONS----------------------------------#
+# def calculate_USD(symbol,price_data,account):
+#     rate =0
+#     if symbol[:3] == "USD":
+#         rate = 1
+#     elif symbol[:3] + "USD" in price_data[account]:
+#         new_symbol = symbol[:3] + "USD"
+#         rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
+#     elif "USD" + symbol[:3] in price_data[account]:
+#         new_symbol = "USD" + symbol[:3]
+#         rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+#     return rate 
+
+def calculate_USD(symbol,price_data,account): #after working stable, delete this and call from helpers
     rate =0
     if symbol[:3] == "USD":
         rate = 1
-    elif symbol[:3] + "USD" in price_data[account]:
-        new_symbol = symbol[:3] + "USD"
-        rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
-    elif "USD" + symbol[:3] in price_data[account]:
-        new_symbol = "USD" + symbol[:3]
-        rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+    if int(account) == 3540205 or int(account) == 3540011:
+        if symbol[:3] + "USD.pr" in price_data[account]:
+            new_symbol = symbol[:3] + "USD.pr"
+            rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
+        elif "USD" + symbol[:3] + ".pr" in price_data[account]:
+            new_symbol = "USD" + symbol[:3] + ".pr"
+            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+    else:
+        if symbol[:3] + "USD" in price_data[account]:
+            new_symbol = symbol[:3] + "USD"
+            rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
+        elif "USD" + symbol[:3] in price_data[account]:
+            new_symbol = "USD" + symbol[:3]
+            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
     return rate 
+
+# def calculate_rightccy(symbol,price_data,account):
+#     rate = 0
+#     if symbol[3:6] == "USD":
+#         rate = 1
+#     elif symbol[3:6] + "USD" in price_data[account]:
+#         new_symbol = symbol[3:6] + "USD"
+#         rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+#     elif "USD" + symbol[3:6] in price_data[account]:
+#         new_symbol =  "USD" + symbol[3:6]
+#         rate = ((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+#     return rate
 
 def calculate_rightccy(symbol,price_data,account):
     rate = 0
     if symbol[3:6] == "USD":
         rate = 1
-    elif symbol[3:6] + "USD" in price_data[account]:
-        new_symbol = symbol[3:6] + "USD"
-        rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
-    elif "USD" + symbol[3:6] in price_data[account]:
-        new_symbol =  "USD" + symbol[3:6]
-        rate = ((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+    if int(account) == 3540205 or int(account) == 3540011: 
+        if symbol[3:6] + "USD.pr" in price_data[account]:
+            new_symbol = symbol[3:6] + "USD" + ".pr"
+            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+        elif "USD" + symbol[3:6] + ".pr" in price_data[account]:
+            new_symbol =  "USD" + symbol[3:6] + ".pr"
+            rate = ((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+    else:
+        if symbol[3:6] + "USD" in price_data[account]:
+            new_symbol = symbol[3:6] + "USD"
+            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+        elif "USD" + symbol[3:6] in price_data[account]:
+            new_symbol =  "USD" + symbol[3:6]
+            rate = ((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
     return rate
 
 def calculate_NOP(size,side,price):
@@ -241,6 +306,8 @@ def prev_pos():
 
     return cached_pre_pos
 
+
+#-------------------------------------------------------UPDATE TABLE FUNCTIONS------------------------------------#
 
 # Function to update the Treeview from the price queue
 def update_treeview(tree):
@@ -390,10 +457,11 @@ def update_position(tree):
     # Schedule the function to run again after 1000 ms (1 second)
     tree.after(1000, update_position, tree)
 
-def update_sum(tree1,tree2): 
+
+def update_sum(tree1,tree2,tree3): 
     pre_data = prev_data()
     pre_pos = prev_pos()
-    if not q_price_sum.empty() or not q_account_sum.empty() or not q_position_sum.empty():
+    while not q_price_sum.empty() or not q_account_sum.empty() or not q_position_sum.empty() or not q_calendar_data.empty():
         try:
             res_account = q_account_sum.get_nowait()
         except Empty:
@@ -403,9 +471,14 @@ def update_sum(tree1,tree2):
         except Empty:
             res_position = {}
         try:
+            global price_data
             price_data = q_price_sum.get_nowait()
         except Empty:
             price_data = {}
+        try:
+            calendar_data = q_calendar_data.get_nowait()
+        except Empty:
+            calendar_data = {}
 
 
         if not isinstance(res_account, dict):
@@ -414,12 +487,15 @@ def update_sum(tree1,tree2):
             res_position = {}
         if not isinstance(price_data, dict):
             res_position = {}
-        # print("Received data")
+        if not isinstance(calendar_data, dict):
+            calendar_data = {}
 
         for item in tree1.get_children(): 
             tree1.delete(item) 
         for item in tree2.get_children():
             tree2.delete(item)
+        for item in tree3.get_children():
+            tree3.delete(item)
     
    
         #table 1
@@ -465,12 +541,16 @@ def update_sum(tree1,tree2):
 
 
         #table2
+        global account_symbol_info
         account_symbol_info = {}
         capital = 0
 
         for acc, tickets in res_position.items():
             if acc not in account_symbol_info:
                 account_symbol_info[acc] = {}
+            
+            # if acc not in account_symbol_store:
+            #     account_symbol_store[acc] = {}
 
             for ticket, ticket_info in tickets.items():
                 symbol = ticket_info["symbol"]
@@ -495,38 +575,154 @@ def update_sum(tree1,tree2):
                         'side':side,
                         'capital':0.0,
                         'comm_swap':0.0,
-                        'rateccy':rate
+                        'rateccy':rate, 
+                        'vwap_price':0.0
                     }
 
                 # Sum the size and floatpl, and keep the market price for the symbol
-                account_symbol_info[acc][symbol]['total_size'] += size
-                account_symbol_info[acc][symbol]['total_floatpl'] += floatpl
-                account_symbol_info[acc][symbol]['market_price'] = market  # Market price updates to the last value
+                account_symbol_info[acc][symbol]['total_size'] += size 
+                account_symbol_info[acc][symbol]['total_floatpl'] += floatpl 
+                account_symbol_info[acc][symbol]['market_price'] = market  # Market price updates to the last value 
                 account_symbol_info[acc][symbol]['capital'] += capital
                 account_symbol_info[acc][symbol]['comm_swap'] += comm_swap
                 account_symbol_info[acc][symbol]['rateccy'] = rate 
-                account_symbol_info[acc][symbol]['side'] = side
-                account_symbol_info[acc][symbol]['yesterday_pl'] = yes_pl
+                account_symbol_info[acc][symbol]['side'] = side #assign variable for prediction
+                account_symbol_info[acc][symbol]['vwap_price'] = calculate_vwap(side,size,capital,comm_swap)
+                try:
+                    account_symbol_info[acc][symbol]['yesterday_pl'] = yes_pl #assign variable for prediction
+                except KeyError as e:
+                    yes_pl = 0
+
                 # print(f"Acc {acc} has capital: {account_symbol_info[acc][symbol]['capital']} and rate is {account_symbol_info[acc][symbol]['rateccy']} for symbol: {symbol}")
 
-        # Print the result to verify
         for acc, symbols in account_symbol_info.items():
-            # print(f"Account {acc}:")
+
+            #process to display information 
             for symbol, info in symbols.items():
-                total_size = info['total_size']
-                total_floatpl = info['total_floatpl'] + info['comm_swap']
-                market_price = info['market_price']
-                side = info['side']
-                vwap_price = calculate_vwap(info["side"],total_size,info["capital"],info['comm_swap'])
-                yesterday_pl = info['yesterday_pl']
+                # global total_size, total_floatpl, market_price, side_curr, yesterday_pl
+                total_size = info['total_size'] #assign variable for prediction
+                total_floatpl = info['total_floatpl'] + info['comm_swap'] #assign variable for prediction
+                market_price = info['market_price'] #assign variable for prediction
+                side_curr = info['side'] #assign variable for prediction
+                # vwap_price = calculate_vwap(info["side"],total_size,info["capital"],info['comm_swap'])
+                vwap_price = info['vwap_price']
+                yesterday_pl = info['yesterday_pl'] #assign variable for prediction
                 
                 tree2.insert('', 'end', values=[
-                acc, symbol,total_size,side,f"{round(total_floatpl,2):,}",f"{round(yesterday_pl,2):,}",market_price,f"{round(vwap_price,5):,}"
+                acc, symbol,total_size,side_curr,f"{round(total_floatpl,2):,}",f"{round(yesterday_pl,2):,}",market_price,f"{round(vwap_price,5):,}"
             ])
-                # print(vwap_price)
+            
+        #table 3
+        rows = []
+        for currency, event in calendar_data.items():
+            if not isinstance(event, dict):
+                continue
+            
+            for event, event_info in event.items():
+                if not isinstance(event_info, dict):
+                    continue  
+                row = [
+                    currency,
+                    event,
+                    event_info.get("actual", "N/A"),
+                    event_info.get("forecast", "N/A"),
+                    event_info.get("previous","N/A"),
+                    int(event_info.get("importance","N/A")),
+                    event_info.get("time","N/A")
+                ]
+                rows.append(row)
         
-    tree1.after(1000,update_sum,tree1,tree2)
+        # Insert rows all at once for better performance
+        rows = sorted(rows, key=lambda x: (x[-1], -x[-2]))
+        for row in rows:
+            if row[-2] == 3:
+                tree3.insert('', 'end', values=row, tag = ("importance",))
+            else:
+                tree3.insert('', 'end', values=row)
+        tree3.tag_configure("importance", background="red",)
 
+    tree1.after(1000,update_sum,tree1,tree2,tree3)
+
+#update prediction 
+# def update_prediction(tree):
+#     """
+#     Updates the Treeview with new data every second. Simulates accounts and currency pair information.
+#     """
+#     # Clear existing rows in the Treeview
+#     for item in tree.get_children(): 
+#         tree.delete(item)
+
+#     # print(account_symbol_info)  
+    
+#     # Iterate over accounts and their symbols
+#     row_index = 0
+#     for account, symbols in account_symbol_info.items():
+#         # Insert the account row
+#         tree.insert(
+#             "", "end",
+#             values=(account, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""),
+#             tags=("account",)
+#         )
+
+#         # Insert rows for each symbol
+#         for symbol, info in symbols.items():
+#             pair = info.get("total_size", "")
+#             yes_pl = round(info.get("yesterday_pl", 0), 2)
+#             mar_price = info.get("market_price", 0)
+#             curr_pl = round(info.get("total_floatpl", 0), 2)
+#             diff = round(curr_pl - yes_pl, 2)
+            
+#             # Apply alternating row styles
+#             tag = "even" if row_index % 2 == 0 else "odd"
+#             tree.insert(
+#                 "", "end",
+#                 values=(
+#                     "", symbol, "", pair, "", "", "", mar_price, yes_pl, curr_pl, diff, "", "", "", "", "", "", "", ""
+#                 ),
+#                 tags=(tag,)
+#             )
+#             row_index += 1
+
+#             # Insert rows for daily data
+#             for day in range(1, 10):
+#                 tag = "even" if row_index % 2 == 0 else "odd"
+#                 tree.insert(
+#                     "", "end",
+#                     values=(
+#                         "", "", day, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""
+#                     ),
+#                     tags=(tag,)
+#                 )
+#                 row_index += 1
+
+#     # Apply alternating colors and account row styles
+#     tree.tag_configure("account", background="lightblue", font=("Arial", 12, "bold"))
+#     tree.tag_configure("even", background="white")
+#     tree.tag_configure("odd", background="lightgray")
+#     for item_id, updated_values in tree.edited_values.items():
+#         tree.item(item_id,values = updated_values)
+    
+#     # Refresh the Treeview every 1 second
+#     tree.after(1000, update_prediction, tree)
+
+def update_prediction(tree):
+    """
+    Updates the Treeview with new data every second, and checks for persisted edited values.
+    Does not clear fixed data rows.
+    """
+    tree.refresh_treeview(account_symbol_info,price_data)
+
+        # if item in 
+    # Apply alternating colors and account row styles
+    tree.tag_configure("account", background="lightblue", font=("Arial", 12, "bold"))
+    tree.tag_configure("even", background="white")
+    tree.tag_configure("odd", background="lightgray")
+
+    # Refresh the Treeview every 1 second
+    tree.after(1000, update_prediction, tree)
+
+
+#--------------------------------------------------------CREATE TABLE FUNTIONS----------------------------------------#
 
 # Create the Treeview widget for Market Price
 def create_table(parent, cols, style):
@@ -548,19 +744,22 @@ def create_table_account(parent, cols,style):
 
 # Create the Treeview widget for Position Information 
 def create_table_positions(parent, cols,style):
-    tree = ttk.Treeview(parent, columns=cols, show="headings",style=style)
+    tree = TreeviewEdit(parent, columns=cols, show="headings",style=style)
     for col in cols:
         tree.heading(col, text=col, anchor="center")
         tree.column(col, anchor="center")
     tree.pack(fill="both", expand=True)
     return tree
 
-# Create the Treeview widget for Total Information
-def create_table_sum(parent,cols1, cols2,cols3, style):
-    # Create the Treeview widget
-    tree1 = ttk.Treeview(parent, columns=cols1, show="headings", style=style)
-    tree2 = ttk.Treeview(parent, columns=cols2, show="headings",style=style)
-    tree3 = ttk.Treeview(parent, columns=cols3, show="headings",style=style)
+#create table function
+def create_table_sum(parent, cols1, cols2, cols3, style):
+    # Create the Treeview widgets
+    # new_height = max(1, parent.winfo_height() // 30)  # Calculate height, minimum 1 row
+    tree1 = ttk.Treeview(parent, columns=cols1, show="headings", style=style, height=max(1, parent.winfo_height() // 30))
+    tree2 = ttk.Treeview(parent, columns=cols2, show="headings", style=style, height=max(1, parent.winfo_height() // 30))
+    tree3 = ttk.Treeview(parent, columns=cols3, show="headings", style=style, height=max(1, parent.winfo_height() // 30))
+
+    # Configure column headings
     for col in cols1:
         tree1.heading(col, text=col, anchor="center")
         tree1.column(col, anchor="center")
@@ -568,15 +767,26 @@ def create_table_sum(parent,cols1, cols2,cols3, style):
     for col in cols2:
         tree2.heading(col, text=col, anchor="center")
         tree2.column(col, anchor="center")
-    
+
     for col in cols3:
         tree3.heading(col, text=col, anchor="center")
         tree3.column(col, anchor="center")
-    
-    tree1.pack(fill="both",expand=True)
+    # table_frame.bind("<Configure>", update_scroll_region)
+    tree1.pack(fill="both", expand=True)
     tree2.pack(fill="both",expand=True)
     tree3.pack(fill="both",expand=True)
-    return tree1,tree2,tree3
+
+    return tree1, tree2, tree3
+
+#create table for predictions
+def create_table_predcition(parent, cols,style):
+    tree = TreeviewEdit(parent, columns=cols, show="headings",style=style)
+    for col in cols:
+        tree.heading(col, text=col, anchor="center")
+        tree.column(col, anchor="center")
+    tree.pack(fill="both", expand=True)
+    return tree
+
 
 
 # GUI setup and main loop
@@ -621,21 +831,30 @@ def startgui():
     notebook.add(tab4,text="Summary")
     cols4_1 = ("Account", "Balance", "Total Floatpl", "Closepl", "Equity", "Margin", "Margin Level", "NOP")
     cols4_2 = ("Account", "Symbol", "Size","Type", "Float PL","Yesterday PL","Market price", "Vwap price")
-    cols4_3 = ("Account", "Symbol", "Day", "Size", "Target Price", "Pips", "Input pips", "New market", "Yesterday PL", "Current PL", "Different", "Lots", "Margin levels")
+    cols4_3 = ("Currency", "Event", "Actual value", "Forcast value", "Previous","Importance", "Time")
+    # cols4_3 = ("Account", "Symbol", "Day", "Size", "Target Price", "Pips", "Input pips", "New market", "Yesterday PL", "Current PL", "Different", "Lots", "Margin levels")
     tree41,tree42,tree43 = create_table_sum(tab4,cols4_1,cols4_2,cols4_3,style="Summary.Treeview")
+
+    #tab 5: User input 
+    tab5 = ttk.Frame(notebook)
+    notebook.add(tab5, text="Prediction")
+    cols5 = ("Account", "Pair", "Day", "Volumn", "Target Price", "Need Pips", "Pips", "New Price", "Yes_P/L","Cur_P/L","Diff1","Lots","Margin1","Add Lot","Total Lots","Vwap","U.P/L","Diff2","Margin2")
+    tree5 = create_table_predcition(tab5,cols5,"Treeview")
 
     # Start the background threads to fetch data
     threading.Thread(target=fetch_price_data_in_thread, daemon=True).start()
     threading.Thread(target=fetch_account_data_in_thread, daemon=True).start()
     threading.Thread(target=fetch_position_data_in_thread, daemon=True).start()
     threading.Thread(target=fetch_sum_data_in_thread,daemon=True).start()
+    # threading.Thread(target=fetch_calendar_data_in_thread,daemon=True).start()
 
     # Start the update functions for the treeview
     update_treeview(tree1)
     update_account(tree2)
     update_position(tree3)
-    update_sum(tree41,tree42)
-
+    update_sum(tree41,tree42,tree43)
+    update_prediction(tree5)
+    # update_calendar(tree5)
     # calculate_closepl()
 
     root.resizable(True, True)
