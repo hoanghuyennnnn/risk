@@ -1,24 +1,36 @@
 import tkinter as tk 
 from tkinter import ttk 
 
-def calculate_USD(symbol,price_data,account):
+def calculate_USD(symbol,price_data,account,side):
     rate =0
-    if symbol[:3] == "USD":
+    if symbol[3:6] == "USD":
         rate = 1
     if int(account) == 3540205 or int(account) == 3540011:
-        if symbol[:3] + "USD.pr" in price_data[account]:
-            new_symbol = symbol[:3] + "USD.pr"
-            rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
-        elif "USD" + symbol[:3] + ".pr" in price_data[account]:
-            new_symbol = "USD" + symbol[:3] + ".pr"
-            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+        if symbol[3:6] + "USD.pr" in price_data[account]:
+            new_symbol = symbol[3:6] + "USD.pr"
+            if side == "buy":
+                rate = price_data[account][new_symbol]["bid"]
+            rate = price_data[account][new_symbol]["ask"]
+            # rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
+        elif "USD" + symbol[3:6] + ".pr" in price_data[account]:
+            new_symbol = "USD" + symbol[3:6] + ".pr"
+            if side == "buy":
+                rate = 1/(price_data[account][new_symbol]["bid"])
+            rate = 1/(price_data[account][new_symbol]["ask"])
+            # rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
     else:
-        if symbol[:3] + "USD" in price_data[account]:
-            new_symbol = symbol[:3] + "USD"
-            rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
-        elif "USD" + symbol[:3] in price_data[account]:
-            new_symbol = "USD" + symbol[:3]
-            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+        if symbol[3:] + "USD" in price_data[account]:
+            new_symbol = symbol[3:] + "USD"
+            if side == "buy":
+                rate = price_data[account][new_symbol]["bid"]
+            rate = price_data[account][new_symbol]["ask"]
+            # rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
+        elif "USD" + symbol[3:] in price_data[account]:
+            new_symbol = "USD" + symbol[3:]
+            if side == "buy":
+                rate = 1/(price_data[account][new_symbol]["bid"])
+            rate = 1/(price_data[account][new_symbol]["ask"])
+            # rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
     return rate 
 
     #----------------------------------CACULATION FUNCTIONS-------------------------------------#
@@ -62,6 +74,21 @@ def calculate_pips(target_price,new_price,symbol):
         return 0.0  # Return a default value if calculation fa
 
 #calculation functions herre, day by day is okay
+def calculate_current_pl(market_price,vwap_price,lots,rate):
+    """
+        rate: is used for to change right ccy to usd
+    """
+    try:
+        market_price = float(market_price) if market_price else 0.0
+        vwap_price = float(vwap_price) if vwap_price else 0.0
+
+        if lots < 0:
+            return round((market_price - vwap_price)*lots * 100000 * rate,2)
+        else:
+            return round((vwap_price- market_price)*lots * 100000 * rate,2)
+    except Exception as e:
+        print(f"Error in calculate pl: {e}")
+        return 0.0
 
 
 class TreeviewEdit(ttk.Treeview):
@@ -170,10 +197,12 @@ class TreeviewEdit(ttk.Treeview):
                 pair = float(info.get("total_size", "")) * -1
                 mar_price = float(info.get("market_price", 0))
                 curr_pl = float(info.get("total_floatpl", 0))
+                # curr_pl = float(info.get("total_floatpl", 0)) + float(info.get("comm_swap",0))
                 yes_pl = float(info.get("yesterday_pl", 0))
                 diff = round(curr_pl - yes_pl, 2)
                 vwap_price = float(info.get("vwap_price",0))
-
+                rate = calculate_USD(symbol,price_data,account,info['side'])
+                
                 # Generate a unique identifier for the row
                 item_id = f"{account}-{symbol}"
 
@@ -206,13 +235,17 @@ class TreeviewEdit(ttk.Treeview):
                     # Fetch the previous day's market price
                     if day == 1:
                         pre_mar = mar_price
+                        pre_yl_temp = curr_pl
+                        rate_usd = rate
                     else:
                         day_item_id_1 = f"{item_id}-day{day-1}"
                         try:
                             pre_mar = float(self.item(day_item_id_1, "values")[7])  # Column 8 for Market Price
-                            # pre_yespl = float(self.item(day_item_id_1, "values")[9]) #the current price becomes yesterday pl
+                            pre_yl_temp = float(self.item(day_item_id_1, "values")[9])
+                            
                         except (KeyError, IndexError, ValueError):
                             pre_mar = mar_price  # Fallback to initial market price
+                            pre_yl_temp = curr_pl
 
                     # Calculate new price
                     try:
@@ -220,9 +253,18 @@ class TreeviewEdit(ttk.Treeview):
                         new_price = calculate_new_price(pre_mar, need_pips, symbol)
                         target_price = self.edited_values.get((day_item_id, 4), 0)
                         pips = calculate_pips(target_price,new_price,symbol)
+                        pre_yl = pre_yl_temp
+                        if new_price == pre_mar:
+                            new_pl = pre_yl_temp
+                        else:
+                            new_pl = calculate_current_pl(new_price,vwap_price,pair,rate_usd)
+                        print(f"Symbol {symbol} has rate usd {rate_usd} and new price {new_price} with lots: {pair}")
                     except Exception as e:
                         new_price = ""  # Default to empty if calculation fails
                         pips = ""
+                        pre_yl_temp = ""
+                        new_pl = ""
+                        new_pl = ""
 
                         print(f"Error calculating new price for {day_item_id}: {e}")
                         print(f"Error calculating new pip for {day_item_id}: {e}")
@@ -237,6 +279,9 @@ class TreeviewEdit(ttk.Treeview):
                         pips,  # Need Pips
                         need_pips,  # Pips
                         new_price,  # New Price
+                        pre_yl,
+                        new_pl,
+                        round(new_pl-pre_yl,2),
                         "",  # Placeholder columns
                     ]
 
