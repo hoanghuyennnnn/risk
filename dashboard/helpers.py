@@ -3,7 +3,7 @@ from tkinter import ttk
 
 def calculate_USD(symbol,price_data,account,side):
     """
-    Calculate the 'rate' to convert ccy to usd.
+    Calculate the 'rate' to convert ccy to usd not the same as one in main file, it is taken 3 right chars.
 
     Args:
         symbol : from dict account_symbol_info
@@ -122,6 +122,52 @@ def calculate_cover_lots(cur_pl,pre_pl,rate):
     """
     different = cur_pl - pre_pl
     return round(different/(rate*100000),2)
+
+def calculate_total_lots(pre_lot,add_lot):
+    """
+    Calculate the total lots after adding lots
+    Args: 
+        pre_lot: from previous day in column total - index 14
+        add_lot: user input
+    
+    Returns:
+        floats: total lot column index 14
+    """
+    try:
+        pre_lot = float(pre_lot) if pre_lot else 0.0
+        add_lot = float(add_lot) if add_lot else 0.0
+
+        return pre_lot - add_lot if pre_lot < 0 else pre_lot + add_lot
+    
+    except Exception as e:
+        print(f"Error in calculate total lots: {e}")
+        return 0.0
+
+def calculate_vwap(add_lots,total_lots,pre_vwap,market_price,oldlot):
+    """
+    Calculate vwap price after adding lots
+    Args: 
+        add_lots: user input
+        total_lots: after user input
+        vwaprice: pre_vwap
+        market_price: new price corresponding row
+        lots: original lots
+    Returns:
+        floats: vwap price 
+    """
+    try:
+        add_lots = float(add_lots) if add_lots else 0.0
+        total_lots = float(total_lots) if total_lots else 0.0
+        pre_vwap = float(pre_vwap) if pre_vwap else 0.0
+        market_price = float(market_price) if market_price else 0.0
+
+        capital = add_lots * market_price * 100000
+        return (abs(capital) + abs(pre_vwap * oldlot * 100000))/abs(total_lots*100000)
+    
+    except Exception as e:
+        print(f"Error in calculate vwap price: {e}")
+        return 0.0
+#------------------------------------------------------TREE CLASS-----------------------------------------------#
 
 class TreeviewEdit(ttk.Treeview):
     def __init__(self, master, **kw):
@@ -253,7 +299,11 @@ class TreeviewEdit(ttk.Treeview):
                     curr_pl,  # Current PL
                     diff,  # Difference
                     cover_lots,
-                    "",  # Placeholder columns
+                    "", 
+                    self.edited_values.get((item_id, 13), ""),
+                    pair,
+                    round(vwap_price,5), #this is original vwap
+                    "" # Placeholder columns
                 ]
 
                 # Insert or update the parent row
@@ -266,45 +316,59 @@ class TreeviewEdit(ttk.Treeview):
                 for day in range(1, 11):
                     day_item_id = f"{item_id}-day{day}"
 
-                    # Fetch the previous day's market price
+                    # Fetch the previous day's market price, if day - 1==0 means today, day -1 = 1 previous day
                     if day == 1:
                         pre_mar = mar_price
                         pre_yl_temp = curr_pl
                         rate_usd = rate
+                        pre_lot = pair
+                        pre_vwap = vwap_price
                     else:
                         day_item_id_1 = f"{item_id}-day{day-1}"
                         try:
                             pre_mar = float(self.item(day_item_id_1, "values")[7])  # Column 8 for Market Price
                             pre_yl_temp = float(self.item(day_item_id_1, "values")[9])
-                            
+                            pre_lot = float(self.item(day_item_id_1,"values")[14]) #column 14 for total lots
+                            pre_vwap = float(self.item(day_item_id_1,"values")[15])
+                            print(f"Pre swap of {symbol}", pre_vwap)
                         except (KeyError, IndexError, ValueError):
                             pre_mar = mar_price  # Fallback to initial market price
                             pre_yl_temp = curr_pl
+                            pre_lot = pair
+                            pre_vwap = vwap_price
+                            
 
-                    # Calculate new price
+                    # Calculate process
                     try:
                         need_pips = self.edited_values.get((day_item_id, 6), 0)
                         new_price = calculate_new_price(pre_mar, need_pips, symbol)
                         target_price = self.edited_values.get((day_item_id, 4), 0)
                         pips = calculate_pips(target_price,new_price,symbol)
+                        add_lot = self.edited_values.get((day_item_id, 13), 0)
                         pre_yl = pre_yl_temp
+
                         if new_price == pre_mar:
                             new_pl = pre_yl_temp
                         else:
                             new_pl = calculate_current_pl(new_price,vwap_price,pair,rate_usd)
                         
-                        print(f"Symbol {symbol} has rate usd {rate_usd} and new price {new_price} with lots: {pair}")
+                        # print(f"Symbol {symbol} has rate usd {rate_usd} and new price {new_price} with lots: {pair}")
                     except Exception as e:
                         new_price = ""  # Default to empty if calculation fails
                         pips = ""
                         pre_yl_temp = ""
                         pre_yl = ""
                         new_pl = ""
+                        add_lot = ""
 
                         print(f"Error calculating new price for {day_item_id}: {e}")
                         print(f"Error calculating new pip for {day_item_id}: {e}")
 
                     cover_lots_1 = calculate_cover_lots(new_pl,pre_yl,rate_usd)
+                    total_lot_1 = calculate_total_lots(pre_lot,add_lot)
+                    # print(f"Symbol {symbol} has add lot: {add_lot} - total lots: {total_lot_1} - vwap price: {pre_vwap} - new price: {new_price} - old lots: { pair}")
+                    vwap_price_1 = calculate_vwap(add_lot,total_lot_1,pre_vwap,new_price, pre_lot)
+                    new_pl_2 = calculate_current_pl(new_price,vwap_price_1,total_lot_1,rate_usd)
                     # Define day row values
                     day_values = [
                         "",  # Account
@@ -319,7 +383,13 @@ class TreeviewEdit(ttk.Treeview):
                         new_pl,
                         round(new_pl-pre_yl,2),
                         cover_lots_1,
-                        "",  # Placeholder columns
+                        "",
+                        add_lot,
+                        total_lot_1,
+                        round(vwap_price_1,5),
+                        round(new_pl_2,2),
+                        round(new_pl_2 - yes_pl,2),
+                        ""  # Placeholder columns
                     ]
 
                     # Insert or update the day row
@@ -332,7 +402,7 @@ class TreeviewEdit(ttk.Treeview):
                 
 
 
-    #----------------------------------UPDATE EACH ROWS-----------------------------------------#
+    #----------------------------------Test class-----------------------------------------#
 
 if __name__ == '__main__':
     root = tk.Tk()
