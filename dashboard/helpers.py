@@ -43,6 +43,26 @@ def calculate_USD(symbol,price_data,account,side):
             # rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
     return rate 
 
+def calculate_leftCCY_USD(symbol,price_data,account): #after working stable, delete this and call from helpers
+    rate =0
+    if symbol[:3] == "USD":
+        rate = 1
+    if int(account) == 3540205 or int(account) == 3540011:
+        if symbol[:3] + "USD.pr" in price_data[account]:
+            new_symbol = symbol[:3] + "USD.pr"
+            rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
+        elif "USD" + symbol[:3] + ".pr" in price_data[account]:
+            new_symbol = "USD" + symbol[:3] + ".pr"
+            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+    else:
+        if symbol[:3] + "USD" in price_data[account]:
+            new_symbol = symbol[:3] + "USD"
+            rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
+        elif "USD" + symbol[:3] in price_data[account]:
+            new_symbol = "USD" + symbol[:3]
+            rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
+    return rate 
+
     #----------------------------------CACULATION FUNCTIONS-------------------------------------#
 def calculate_new_price(pre_price, pip, symbol):
     """
@@ -102,9 +122,9 @@ def calculate_current_pl(market_price,vwap_price,lots,rate):
         vwap_price = float(vwap_price) if vwap_price else 0.0
 
         if lots < 0:
-            return round((market_price - vwap_price)*lots * 100000 * rate,2)
+            return round((vwap_price - market_price)*abs(lots) * 100000 * rate,2)
         else:
-            return round((vwap_price- market_price)*lots * 100000 * rate,2)
+            return round((market_price - vwap_price)*abs(lots) * 100000 * rate,2)
     except Exception as e:
         print(f"Error in calculate pl: {e}")
         return 0.0
@@ -167,6 +187,18 @@ def calculate_vwap(add_lots,total_lots,pre_vwap,market_price,oldlot):
     except Exception as e:
         print(f"Error in calculate vwap price: {e}")
         return 0.0
+    
+def sum_nested_dict(data):
+    """
+    Calculate total new pl for new margin
+    """
+    total = 0
+    for key, value in data.items():
+        if isinstance(value, dict):
+            total += sum_nested_dict(value)  # Recursive call for nested dictionaries
+        else:
+            total += value  # Add the value if it's not a dictionary
+    return total
 #------------------------------------------------------TREE CLASS-----------------------------------------------#
 
 class TreeviewEdit(ttk.Treeview):
@@ -264,24 +296,46 @@ class TreeviewEdit(ttk.Treeview):
 
 
 
-    def refresh_treeview(self, api_data, price_data):
+    def refresh_treeview(self, api_data, price_data,acc_data):
         """Refresh the Treeview with new API data while appending 10 rows per currency pair for each account."""
         self.delete(*self.get_children())  # Clear the treeview
+        total_new_pl_holder={}
 
         for account, symbols in api_data.items():
+            daily_pl_holder = {}
+
             for symbol, info in symbols.items():
+                # if symbol not in total_new_pl_holder[account]:
+                #     total_new_pl_holder[account][symbol] = 0.0
+
                 if info['side'] == "buy":
                     pair = float(info.get("total_size", ""))
                 pair = float(info.get("total_size", "")) * -1
                 mar_price = float(info.get("market_price", 0))
-                curr_pl = float(info.get("total_floatpl", 0))
-                # curr_pl = float(info.get("total_floatpl", 0)) + float(info.get("comm_swap",0))
+                # curr_pl = float(info.get("total_floatpl", 0))
+                curr_pl = float(info.get("total_floatpl", 0)) + float(info.get("comm_swap",0))
                 yes_pl = float(info.get("yesterday_pl", 0))
                 diff = round(curr_pl - yes_pl, 2)
                 vwap_price = float(info.get("vwap_price",0))
                 rate = calculate_USD(symbol,price_data,account,info['side'])
-                cover_lots = calculate_cover_lots(curr_pl,yes_pl,rate)
+                rate_ = calculate_leftCCY_USD(symbol,price_data,account) #rate to convert 
+                cover_lots = calculate_cover_lots(curr_pl,yes_pl,rate_)
                 
+                if account in acc_data:
+                    if account not in total_new_pl_holder:
+                        total_new_pl_holder[account]={}
+                    balance = acc_data[account].get("balance",0)
+                    equity = acc_data[account].get("equity",0)
+                    margin = acc_data[account].get("margin",1)
+
+                    margin_level = (equity/margin)*100
+                else:
+                    balance = equity = 0
+                    margin = 1
+                    margin_level = 0
+                
+                # if symbol not in total_new_pl_holder[account]:
+                #     total_new_pl_holder[account][symbol] = {}
                 # Generate a unique identifier for the row
                 item_id = f"{account}-{symbol}"
 
@@ -289,17 +343,17 @@ class TreeviewEdit(ttk.Treeview):
                 values = [
                     account,  # Account
                     symbol,  # Pair
-                    "",  # Day
-                    pair,  # Volume
+                    "",  # Day -> filled
+                    pair,  # Volume -> filled
                     self.edited_values.get((item_id, 4), ""),  # Target Price
-                    "",  # Need Pips
+                    "",  # Need Pips -> filled
                     self.edited_values.get((item_id, 6), ""),  # Pips
                     mar_price,  # Market Price
                     yes_pl,  # Yesterday PL
                     curr_pl,  # Current PL
                     diff,  # Difference
                     cover_lots,
-                    "", 
+                    f"{round(margin_level,2)}%", 
                     self.edited_values.get((item_id, 13), ""),
                     pair,
                     round(vwap_price,5), #this is original vwap
@@ -313,7 +367,16 @@ class TreeviewEdit(ttk.Treeview):
                     self.insert("", "end", iid=item_id, values=values,tags=("accsym",))
 
                 # Insert child rows for each day
+
                 for day in range(1, 11):
+                    if day not in total_new_pl_holder[account]:
+                        total_new_pl_holder[account][day]={}
+                    
+                    if symbol not in total_new_pl_holder[account][day]:
+                        total_new_pl_holder[account][day][symbol] = 0.0
+                    # day_id = f"day{day}"
+                    total_new_pl = 0
+                    global day_item_id
                     day_item_id = f"{item_id}-day{day}"
 
                     # Fetch the previous day's market price, if day - 1==0 means today, day -1 = 1 previous day
@@ -323,6 +386,7 @@ class TreeviewEdit(ttk.Treeview):
                         rate_usd = rate
                         pre_lot = pair
                         pre_vwap = vwap_price
+                      
                     else:
                         day_item_id_1 = f"{item_id}-day{day-1}"
                         try:
@@ -330,7 +394,8 @@ class TreeviewEdit(ttk.Treeview):
                             pre_yl_temp = float(self.item(day_item_id_1, "values")[9])
                             pre_lot = float(self.item(day_item_id_1,"values")[14]) #column 14 for total lots
                             pre_vwap = float(self.item(day_item_id_1,"values")[15])
-                            print(f"Pre swap of {symbol}", pre_vwap)
+                            
+                            # print(f"Pre swap of {symbol}", pre_vwap)
                         except (KeyError, IndexError, ValueError):
                             pre_mar = mar_price  # Fallback to initial market price
                             pre_yl_temp = curr_pl
@@ -351,6 +416,13 @@ class TreeviewEdit(ttk.Treeview):
                             new_pl = pre_yl_temp
                         else:
                             new_pl = calculate_current_pl(new_price,vwap_price,pair,rate_usd)
+                        total_new_pl_holder[account][day][symbol] += new_pl
+                        
+                        # total_new_pl += new_pl
+                        
+                        # # print(f"Acc: {account} balance: {balance} day {day}: {total_new_pl}")
+                        # margin_ = ((balance + total_new_pl)/margin)*100
+                        # # print("margin: ",margin_)
                         
                         # print(f"Symbol {symbol} has rate usd {rate_usd} and new price {new_price} with lots: {pair}")
                     except Exception as e:
@@ -364,41 +436,45 @@ class TreeviewEdit(ttk.Treeview):
                         print(f"Error calculating new price for {day_item_id}: {e}")
                         print(f"Error calculating new pip for {day_item_id}: {e}")
 
+                    # total_new_pl_holder[account] += new_pl
                     cover_lots_1 = calculate_cover_lots(new_pl,pre_yl,rate_usd)
                     total_lot_1 = calculate_total_lots(pre_lot,add_lot)
                     # print(f"Symbol {symbol} has add lot: {add_lot} - total lots: {total_lot_1} - vwap price: {pre_vwap} - new price: {new_price} - old lots: { pair}")
                     vwap_price_1 = calculate_vwap(add_lot,total_lot_1,pre_vwap,new_price, pre_lot)
                     new_pl_2 = calculate_current_pl(new_price,vwap_price_1,total_lot_1,rate_usd)
-                    # Define day row values
-                    day_values = [
-                        "",  # Account
-                        "",  # Pair
-                        day,  # Day
-                        "",  # Volume
-                        self.edited_values.get((day_item_id, 4), ""),  # Target Price
-                        pips,  # Need Pips
-                        need_pips,  # Pips
-                        new_price,  # New Price
-                        pre_yl,
-                        new_pl,
-                        round(new_pl-pre_yl,2),
-                        cover_lots_1,
-                        "",
-                        add_lot,
-                        total_lot_1,
-                        round(vwap_price_1,5),
-                        round(new_pl_2,2),
-                        round(new_pl_2 - yes_pl,2),
-                        ""  # Placeholder columns
-                    ]
 
-                    # Insert or update the day row
+                        # Define day row values
+                    day_values = [
+                            "",  # Account
+                            "",  # Pair
+                            day,  # Day
+                            "",  # Volume
+                            self.edited_values.get((day_item_id, 4), ""),  # Target Price
+                            pips,  # Need Pips
+                            need_pips,  # Pips
+                            new_price,  # New Price
+                            pre_yl,
+                            new_pl,
+                            round(new_pl-pre_yl,2),
+                            cover_lots_1,
+                            "",
+                            add_lot,
+                            total_lot_1,
+                            round(vwap_price_1,5),
+                            round(new_pl_2,2),
+                            round(new_pl_2 - yes_pl,2),
+                            ""  # Placeholder columns
+                        ]
+
+                    
+                        # Insert or update the day row
                     if day_item_id in self.get_children():
                         self.item(day_item_id, values=day_values)
                     else:
                         self.insert("", "end", iid=day_item_id, values=day_values)
 
-
+                #processing for margin
+                   
                 
 
 

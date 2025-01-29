@@ -10,6 +10,16 @@ from queue import Empty
 import json
 from helpers import TreeviewEdit
 from tkinter import Canvas, Frame, Scrollbar
+import pandas as pd 
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+#declared constant value 
+URL_PRICE = "http://127.0.0.1/api/prices/symbol"
+URL_POSITION="http://127.0.0.1/api/positions/data"
+URL_ACCOUNT = "http://127.0.0.1/api/accounts/data"
+URL_CALENDAR = "http://127.0.0.1/api/calendar/data"
 
 # Global queues for each tab's data
 q_price = queue.Queue()
@@ -19,10 +29,12 @@ q_price_sum = queue.Queue()
 q_account_sum = queue.Queue()
 q_position_sum = queue.Queue() 
 q_calendar_data = queue.Queue()
+q_price_test = queue.Queue()
 
 # Function to fetch data from the API
 def fetch_price_data():
-    url = "http://127.0.0.1/api/prices/symbol"
+    # url = "http://127.0.0.1/api/prices/symbol"
+    url = URL_PRICE
     try:
         response = requests.get(url)
         data = response.json()  # Assuming the data returned is JSON
@@ -39,7 +51,8 @@ def fetch_price_data_in_thread():
         time.sleep(1)  # Fetch new data every second
 
 def fetch_account_data():
-    url = "http://127.0.0.1/api/accounts/data"
+    # url = "http://127.0.0.1/api/accounts/data"
+    url = URL_ACCOUNT
     try:
         response = requests.get(url)
         data = response.json()
@@ -55,7 +68,8 @@ def fetch_account_data_in_thread():
         time.sleep(1)
 
 def fetch_position_data():
-    url = "http://127.0.0.1/api/positions/data"
+    # url = "http://127.0.0.1/api/positions/data"
+    url = URL_POSITION
     try:
         response = requests.get(url)
         data = response.json()
@@ -89,10 +103,14 @@ def fetch_position_data_in_thread():
 #         time.sleep(1)
 
 def fetch_sum_data():
-    price_url= "http://127.0.0.1/api/prices/symbol"
-    position_url = "http://127.0.0.1/api/positions/data"
-    acc_url = "http://127.0.0.1/api/accounts/data"
-    calendar_url = "http://127.0.0.1/api/calendar/data"
+    # price_url= "http://127.0.0.1/api/prices/symbol"
+    # position_url = "http://127.0.0.1/api/positions/data"
+    # acc_url = "http://127.0.0.1/api/accounts/data"
+    # calendar_url = "http://127.0.0.1/api/calendar/data"
+    price_url = URL_PRICE
+    position_url = URL_POSITION
+    acc_url = URL_ACCOUNT
+    calendar_url = URL_CALENDAR
 
     try:
         response_price = requests.get(price_url)
@@ -121,7 +139,7 @@ def fetch_sum_data_in_thread():
         time.sleep(1)
 
 # Connect to database to query data 
-with open("D:\Hoang_report\database\data\dashboard\config.json", "r") as config_file:
+with open(".\config.json", "r") as config_file:
     config = json.load(config_file)
 
 def connect_db_fetch_data(query):
@@ -142,17 +160,7 @@ def connect_db_fetch_data(query):
         print(f"Error: {e}")
 
 #--------------------------------------------------------------------CALCULATION FUNCTIONS----------------------------------#
-# def calculate_USD(symbol,price_data,account):
-#     rate =0
-#     if symbol[:3] == "USD":
-#         rate = 1
-#     elif symbol[:3] + "USD" in price_data[account]:
-#         new_symbol = symbol[:3] + "USD"
-#         rate = (price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2
-#     elif "USD" + symbol[:3] in price_data[account]:
-#         new_symbol = "USD" + symbol[:3]
-#         rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
-#     return rate 
+
 
 def calculate_USD(symbol,price_data,account): #after working stable, delete this and call from helpers
     rate =0
@@ -174,17 +182,6 @@ def calculate_USD(symbol,price_data,account): #after working stable, delete this
             rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
     return rate 
 
-# def calculate_rightccy(symbol,price_data,account):
-#     rate = 0
-#     if symbol[3:6] == "USD":
-#         rate = 1
-#     elif symbol[3:6] + "USD" in price_data[account]:
-#         new_symbol = symbol[3:6] + "USD"
-#         rate = 1/((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
-#     elif "USD" + symbol[3:6] in price_data[account]:
-#         new_symbol =  "USD" + symbol[3:6]
-#         rate = ((price_data[account][new_symbol]["bid"] + price_data[account][new_symbol]["ask"])/2)
-#     return rate
 
 def calculate_rightccy(symbol,price_data,account):
     rate = 0
@@ -213,7 +210,7 @@ def calculate_capital(size,price):
     return abs(size*100000*price)
 
 def calculate_vwap(side,size,capital,commswap):
-    if (side == "buy" and commswap < 0) or (side == "sell" and commswap < 0):
+    if (side == "buy" and commswap < 0) or (side == "sell" and commswap > 0):
         vwap = (capital - commswap) / abs(size*100000) 
     else:
         vwap = (capital + commswap) / abs(size*100000)
@@ -459,10 +456,12 @@ def update_position(tree):
 
 
 def update_sum(tree1,tree2,tree3): 
+    # global pre_data
     pre_data = prev_data()
     pre_pos = prev_pos()
     while not q_price_sum.empty() or not q_account_sum.empty() or not q_position_sum.empty() or not q_calendar_data.empty():
         try:
+            global res_account
             res_account = q_account_sum.get_nowait()
         except Empty:
             res_account = {}
@@ -562,7 +561,10 @@ def update_sum(tree1,tree2,tree3):
                 side = ticket_info["side"]
                 capital = calculate_capital(size,openprice)
                 rate = calculate_rightccy(symbol,price_data,acc)
-                yes_pl = pre_pos[int(acc)][symbol]['totalpl']
+                try:
+                    yes_pl = pre_pos[int(acc)][symbol]['totalpl']
+                except Exception as e:
+                    yes_pl = 0
                 
 
                 # Initialize the symbol if not already in the account's dictionary
@@ -587,7 +589,8 @@ def update_sum(tree1,tree2,tree3):
                 account_symbol_info[acc][symbol]['comm_swap'] += comm_swap
                 account_symbol_info[acc][symbol]['rateccy'] = rate 
                 account_symbol_info[acc][symbol]['side'] = side #assign variable for prediction
-                account_symbol_info[acc][symbol]['vwap_price'] = calculate_vwap(side,size,capital,comm_swap)
+                comm_swap_usd = comm_swap * rate
+                account_symbol_info[acc][symbol]['vwap_price'] = calculate_vwap(side,size,capital,comm_swap_usd)
                 try:
                     account_symbol_info[acc][symbol]['yesterday_pl'] = yes_pl #assign variable for prediction
                 except KeyError as e:
@@ -643,74 +646,15 @@ def update_sum(tree1,tree2,tree3):
 
     tree1.after(1000,update_sum,tree1,tree2,tree3)
 
-#update prediction 
-# def update_prediction(tree):
-#     """
-#     Updates the Treeview with new data every second. Simulates accounts and currency pair information.
-#     """
-#     # Clear existing rows in the Treeview
-#     for item in tree.get_children(): 
-#         tree.delete(item)
 
-#     # print(account_symbol_info)  
-    
-#     # Iterate over accounts and their symbols
-#     row_index = 0
-#     for account, symbols in account_symbol_info.items():
-#         # Insert the account row
-#         tree.insert(
-#             "", "end",
-#             values=(account, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""),
-#             tags=("account",)
-#         )
-
-#         # Insert rows for each symbol
-#         for symbol, info in symbols.items():
-#             pair = info.get("total_size", "")
-#             yes_pl = round(info.get("yesterday_pl", 0), 2)
-#             mar_price = info.get("market_price", 0)
-#             curr_pl = round(info.get("total_floatpl", 0), 2)
-#             diff = round(curr_pl - yes_pl, 2)
-            
-#             # Apply alternating row styles
-#             tag = "even" if row_index % 2 == 0 else "odd"
-#             tree.insert(
-#                 "", "end",
-#                 values=(
-#                     "", symbol, "", pair, "", "", "", mar_price, yes_pl, curr_pl, diff, "", "", "", "", "", "", "", ""
-#                 ),
-#                 tags=(tag,)
-#             )
-#             row_index += 1
-
-#             # Insert rows for daily data
-#             for day in range(1, 10):
-#                 tag = "even" if row_index % 2 == 0 else "odd"
-#                 tree.insert(
-#                     "", "end",
-#                     values=(
-#                         "", "", day, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""
-#                     ),
-#                     tags=(tag,)
-#                 )
-#                 row_index += 1
-
-#     # Apply alternating colors and account row styles
-#     tree.tag_configure("account", background="lightblue", font=("Arial", 12, "bold"))
-#     tree.tag_configure("even", background="white")
-#     tree.tag_configure("odd", background="lightgray")
-#     for item_id, updated_values in tree.edited_values.items():
-#         tree.item(item_id,values = updated_values)
-    
-#     # Refresh the Treeview every 1 second
-#     tree.after(1000, update_prediction, tree)
 
 def update_prediction(tree):
     """
     Updates the Treeview with new data every second, and checks for persisted edited values.
-    Does not clear fixed data rows.
+    All functions are in helpers.py file
     """
-    tree.refresh_treeview(account_symbol_info,price_data)
+    # tree.refresh_treeview(account_symbol_info,price_data,res_account)
+    tree.refresh_treeview(account_symbol_info,price_data, res_account)
 
         # if item in 
     # Apply alternating colors and account row styles
@@ -721,7 +665,44 @@ def update_prediction(tree):
     # Refresh the Treeview every 1 second
     tree.after(1000, update_prediction, tree)
 
+#calculate correlation between currency
+def calculate_correlation(df):
+    if len(df) >=3:
+        pd.options.display.float_format = '{:,.2f}'.format
+        correlation_matrix = df.corr()
+        correlation_matrix.fillna("NaN",0)
+    else:
+        return
 
+hourly_data = {}
+def handle_hourly_data():
+    global price_data
+    while True:
+        # Simulate fetching data from an API
+        data = price_data
+
+        for acc, syms in data.items():
+            if int(acc) == 3540205:  # Check if the account matches
+                for sym, info in syms.items():
+                    if sym not in hourly_data:
+                        hourly_data[sym] = {}
+                    
+                    hour = datetime.strptime(info["date"], "%Y.%m.%d %H:%M").minute
+                    
+                    if hour not in hourly_data[sym]:
+                        if len(hourly_data[sym]) >=3:
+                            oldest_one = min(hourly_data[sym].keys())
+                            del hourly_data[sym][oldest_one]
+                        hourly_data[sym][hour] = (info["bid"] + info["ask"]) / 2
+                    else:
+                        hourly_data[sym][hour] = (info["bid"] + info["ask"]) / 2
+        df = pd.DataFrame(hourly_data)
+        calculate_correlation(df)
+
+
+# Function to update the heatmap
+def update_map(tree):
+    pass
 #--------------------------------------------------------CREATE TABLE FUNTIONS----------------------------------------#
 
 # Create the Treeview widget for Market Price
@@ -788,6 +769,12 @@ def create_table_predcition(parent, cols,style):
     return tree
 
 
+def create_map(parent):
+    fig, ax = plt.subplots()
+    canvas = FigureCanvasTkAgg(fig, master=parent)
+    canvas.draw()
+    canvas.get_tk_widget().pack()
+                   
 
 # GUI setup and main loop
 def startgui():
@@ -841,6 +828,16 @@ def startgui():
     cols5 = ("Account", "Pair", "Day", "Volumn", "Target Price", "Need Pips", "Pips", "New Price", "Yes_P/L","Cur_P/L","Diff1","Lots","Margin1","Add Lot","Total Lots","Vwap","U.P/L","Diff2","Margin2")
     tree5 = create_table_predcition(tab5,cols5,"Treeview")
 
+    #tab6: Correlation 
+    tab6 = ttk.Frame(notebook)
+    notebook.add(tab6, text="Correlation")
+    tree6 = create_map(tab6)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    canvas = FigureCanvasTkAgg(fig, master=tab6)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.pack(fill="both", expand=True)
+
+
     # Start the background threads to fetch data
     threading.Thread(target=fetch_price_data_in_thread, daemon=True).start()
     threading.Thread(target=fetch_account_data_in_thread, daemon=True).start()
@@ -854,6 +851,7 @@ def startgui():
     update_position(tree3)
     update_sum(tree41,tree42,tree43)
     update_prediction(tree5)
+    update_map(tree6)
     # update_calendar(tree5)
     # calculate_closepl()
 
